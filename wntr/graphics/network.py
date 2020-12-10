@@ -5,11 +5,9 @@ water network model.
 import logging
 import networkx as nx
 import pandas as pd
-try:
-    import matplotlib.pyplot as plt
-    from matplotlib import animation
-except:
-    plt = None
+import matplotlib.pyplot as plt
+from matplotlib import animation
+
 try:
     import plotly
 except:
@@ -137,9 +135,6 @@ def plot_network(wn, node_attribute=None, link_attribute=None, title=None,
     -----
     For more network draw options, see nx.draw_networkx
     """
-    
-    if plt is None:
-        raise ImportError('matplotlib is required')
 
     if ax is None: # create a new figure
         plt.figure(facecolor='w', edgecolor='k')
@@ -214,7 +209,7 @@ def plot_network(wn, node_attribute=None, link_attribute=None, title=None,
     edge_background = nx.draw_networkx_edges(G, pos, edge_color='grey', 
                                              width=0.5, ax=ax)
     
-    nodes = nx.draw_networkx_nodes(G, pos, with_labels=False, 
+    nodes = nx.draw_networkx_nodes(G, pos, 
             nodelist=nodelist, node_color=nodecolor, node_size=node_size, 
             alpha=node_alpha, cmap=node_cmap, vmin=node_range[0], vmax = node_range[1], 
             linewidths=0, ax=ax)
