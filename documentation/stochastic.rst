@@ -34,7 +34,7 @@ based on the failure probability of each pipe.
     >>> selected_pipes = np.random.choice(pipe_names, N, replace=False, 
     ...     p=failure_probability)
 				     
-A `stochastic simulation example <https://github.com/USEPA/WNTR/blob/master/examples/stochastic_simulation.py>`_ provided with WNTR runs multiple realizations 
+A `stochastic simulation example <https://github.com/USEPA/WNTR/blob/main/examples/stochastic_simulation.py>`_ provided with WNTR runs multiple realizations 
 of a pipe leak scenario where the location and duration are drawn from probability 
 distributions.
 
@@ -134,7 +134,7 @@ To plot the damage state on the network, the state (i.e., Major) can be converte
     >>> priority_map = FC.get_priority_map()
     >>> damage_value = damage_state.map(priority_map)
     >>> custom_cmp = wntr.graphics.custom_colormap(3, ['grey', 'royalblue', 'darkorange'])
-    >>> nodes, edges = wntr.graphics.plot_network(wn, link_attribute=damage_value, 
+    >>> ax = wntr.graphics.plot_network(wn, link_attribute=damage_value, 
     ...     node_size=0, link_width=2, link_cmap=custom_cmp, 
     ...     title='Damage state: 0=None, 1=Minor, 2=Major') 
    

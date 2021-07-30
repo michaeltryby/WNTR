@@ -142,7 +142,7 @@ Of the EPANET model options that directly apply to hydraulic simulations, **the 
 * D-W and C-M headloss options in the [OPTIONS] section (H-W option is used)
 * Accuracy, unbalanced, and emitter exponent from the [OPTIONS] section
 * Pump speed in the [PUMPS] section
-* Pattern start, report start, start clocktime, and statistics in the [TIMES] section
+* Pattern start, report start, and statistics in the [TIMES] section
 * PBV and GPV values in the [VALVES] section
 
 **Future development of WNTR will address these limitations.**
@@ -164,7 +164,9 @@ Known discrepancies between the WNTRSimulator and EpanetSimulator are listed bel
   head pump curves are created by connecting the points with straight-line segments.  
   When using the WNTRSimulator, the points are fit to the same :math:`H = A - B*Q^C` 
   function that is used for 3-point curves.
-* **Variable minimum and required pressure**: 
-  While the WaterNetworkModel can store spatially variable minimum and required pressure that are used in the WNTRSimulator, 
-  those values cannot be saved when writing an INP file, rather the minimum and required pressure values in the options are saved.
-  This impacts the ability to use those junction attributes in the EpanetSimulator. 
+* **Variable required pressure, minimum pressure, and pressure exponent**: 
+  Junction attributes can be used to assign spatially variable required pressure, minimum pressure, and pressure exponent.  
+  These attributes are only used for pressure dependent demand simulation with the WNTRSimulator.  
+  If the junction attributes are set to None (the default value), then the required pressure, minimum pressure, and pressure exponent defined in the global hydraulic options (`wn.options.hydraulic`) are used for that junction.
+  Pressure dependent demand simulation using the EpanetSimulator always uses values in the global hydraulic options.
+ 

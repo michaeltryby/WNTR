@@ -6,7 +6,7 @@ import warnings
 import logging
 from wntr.network.model import WaterNetworkModel
 from wntr.network.base import NodeType, LinkType, LinkStatus
-from wntr.network.elements import Junction, Tank, Reservoir, Pipe, HeadPump, PowerPump, PRValve, PSValve, FCValve, \
+from wntr.network.elements import Junction, Tank, Reservoir, Pipe, Pump, HeadPump, PowerPump, PRValve, PSValve, FCValve, \
     TCValve, GPValve, PBValve
 from collections import OrderedDict
 from wntr.utils.ordered_set import OrderedSet
@@ -54,6 +54,10 @@ def create_hydraulic_model(wn, HW_approx='default'):
     param.leak_area_param.build(m, wn, model_updater)
     param.leak_poly_coeffs_param.build(m, wn, model_updater)
     param.elevation_param.build(m, wn, model_updater)
+    if wn.options.hydraulic.headloss == 'C-M':
+        raise NotImplementedError('C-M headloss is not currently supported in the WNTRSimulator')
+    if wn.options.hydraulic.headloss == 'D-W':
+        raise NotImplementedError('D-W headloss is not currently supported in the WNTRSimulator')
     param.hw_resistance_param.build(m, wn, model_updater)
     param.minor_loss_param.build(m, wn, model_updater)
     param.tcv_resistance_param.build(m, wn, model_updater)
@@ -186,7 +190,7 @@ def update_tank_heads(wn):
             level_new = np.interp(V1,volume_y,level_x)
             delta_h = level_new - cur_level
                 
-        tank.head = tank._prev_head + delta_h
+        tank._head = tank._prev_head + delta_h
             
 
 
@@ -211,6 +215,7 @@ def initialize_results_dict(wn):
     link_res['flowrate'] = OrderedDict((name, list()) for name, obj in wn.links())
     link_res['velocity'] = OrderedDict((name, list()) for name, obj in wn.links())
     link_res['status'] = OrderedDict((name, list()) for name, obj in wn.links())
+    link_res['setting'] = OrderedDict((name, list()) for name, obj in wn.links())
 
     return node_res, link_res
 
@@ -248,12 +253,14 @@ def save_results(wn, node_res, link_res):
         link_res['flowrate'][name].append(link.flow)
         link_res['velocity'][name].append(abs(link.flow)*4.0 / (math.pi*link.diameter**2))
         link_res['status'][name].append(link.status)
+        link_res['setting'][name].append(link.roughness)
 
     for name, link in wn.head_pumps():
         link_res['flowrate'][name].append(link.flow)
         link_res['velocity'][name].append(0)
         link_res['status'][name].append(link.status)
-
+        link_res['setting'][name].append(1)
+        
         A, B, C = link.get_head_curve_coefficients()
         if link.flow > (A/B)**(1.0/C):
             start_node_name = link.start_node_name
@@ -271,11 +278,13 @@ def save_results(wn, node_res, link_res):
         link_res['flowrate'][name].append(link.flow)
         link_res['velocity'][name].append(0)
         link_res['status'][name].append(link.status)
+        link_res['setting'][name].append(1) # power pumps have no speed
 
     for name, link in wn.valves():
         link_res['flowrate'][name].append(link.flow)
         link_res['velocity'][name].append(abs(link.flow)*4.0 / (math.pi*link.diameter**2))
         link_res['status'][name].append(link.status)
+        link_res['setting'][name].append(link.setting)
 
 
 def get_results(wn, results, node_res, link_res):
@@ -302,7 +311,30 @@ def get_results(wn, results, node_res, link_res):
         link_res[key] = pd.DataFrame(data=np.array([link_res[key][name] for name in link_names]).transpose(), index=results.time,
                                             columns=link_names)
     results.link = link_res
-
+    
+    # Add headloss to results.link -- removed for now, this is slow
+    #headloss = pd.DataFrame(data=None, index=results.time, columns=link_names)
+    # for name, link in wn.links():
+    #     start_node = link.start_node_name
+    #     end_node = link.end_node_name
+    #     start_head = results.node['head'].loc[:,start_node]
+    #     end_head = results.node['head'].loc[:,end_node]
+    #     if isinstance(link, Pipe):
+    #         # Unit headloss for pipes
+    #         headloss.loc[:,name] = abs(end_head - start_head)/link.length
+    #     elif isinstance(link, Pump):
+    #         # Negative of head gain for pumps 
+    #         head_gain = -(end_head - start_head)
+    #         head_gain[head_gain > 0] = 0
+    #         headloss.loc[:,name] = head_gain
+    #     else:
+    #         # Total head loss for valves
+    #         headloss.loc[:,name] = (end_head - start_head)
+            
+    #     # Headloss is 0 if the link is closed
+    #     headloss.loc[results.link['status'].loc[:,name] == 0,name] = 0
+        
+    #results.link['headloss'] = headloss
 
 def store_results_in_network(wn, m):
     """
@@ -320,33 +352,38 @@ def store_results_in_network(wn, m):
         else:
             link._flow = m.flow[name].value
 
+    for name, link in wn.valves():
+        link._setting = m.valve_setting[name].value
+
     for name, node in wn.junctions():
         if node._is_isolated:
-            node.head = 0
-            node.demand = 0
-            node.leak_demand = 0
+            node._head = 0
+            node._demand = 0
+            node._pressure = 0
+            node._leak_demand = 0
         else:
-            node.head = m.head[name].value
+            node._head = m.head[name].value
+            node._pressure = m.head[name].value - node.elevation
             if mode in ['PDD', 'PDA']:
-                node.demand = m.demand[name].value
+                node._demand = m.demand[name].value
             else:
-                node.demand = m.expected_demand[name].value
+                node._demand = m.expected_demand[name].value
             if node.leak_status:
-                node.leak_demand = m.leak_rate[name].value
+                node._leak_demand = m.leak_rate[name].value
             else:
-                node.leak_demand = 0
+                node._leak_demand = 0
 
     for name, node in wn.tanks():
         if node.leak_status:
-            node.leak_demand = m.leak_rate[name].value
+            node._leak_demand = m.leak_rate[name].value
         else:
-            node.leak_demand = 0
-        node.demand = (sum(wn.get_link(link_name).flow for link_name in wn.get_links_for_node(name, 'INLET')) -
+            node._leak_demand = 0
+        node._demand = (sum(wn.get_link(link_name).flow for link_name in wn.get_links_for_node(name, 'INLET')) -
                        sum(wn.get_link(link_name).flow for link_name in wn.get_links_for_node(name, 'OUTLET')) -
-                       node.leak_demand)
+                       node._leak_demand)
 
     for name, node in wn.reservoirs():
-        node.head = node.head_timeseries.at(wn.sim_time)
-        node.leak_demand = 0
-        node.demand = (sum(wn.get_link(link_name).flow for link_name in wn.get_links_for_node(name, 'INLET')) -
+        node._head = node.head_timeseries.at(wn.sim_time)
+        node._leak_demand = 0
+        node._demand = (sum(wn.get_link(link_name).flow for link_name in wn.get_links_for_node(name, 'INLET')) -
                        sum(wn.get_link(link_name).flow for link_name in wn.get_links_for_node(name, 'OUTLET')))

@@ -279,8 +279,8 @@ class _Diagnostics(object): # pragma: no cover
         os.system('open link_comparison_' + link_name + '_' + str(t) + '.html')
 
     def store_var_values_in_network(self):
-        self.mode = self._wn.options.hydraulic.demand_model
-        wntr.sim.hydraulics.store_results_in_network(self.wn, self.model, self.mode)
+        # self.mode = self._wn.options.hydraulic.demand_model
+        wntr.sim.hydraulics.store_results_in_network(self.wn, self.model) #, self.mode)
 
     @classmethod
     def _plot_interactive_network(cls, wn, title=None, node_size=8, link_width=2,
@@ -505,7 +505,7 @@ class WNTRSimulator(WaterNetworkSimulator):
         self._backup_solver = None
         self._solver_options = dict()
         self._backup_solver_options = dict()
-        self._convergence_error = True
+        self._convergence_error = False
 
         # other attributes
         self._hydraulic_timestep = None
@@ -527,7 +527,7 @@ class WNTRSimulator(WaterNetworkSimulator):
         m = int(s/60)
         s -= m*60
         s = int(s)
-        return str(h)+':'+str(m)+':'+str(s)
+        return '{:02}:{:02}:{:02}'.format(h, m, s)
 
     def _setup_sim_options(self, solver, backup_solver, solver_options, backup_solver_options, convergence_error):
         self._report_timestep = self._wn.options.time.report_timestep
@@ -793,8 +793,9 @@ class WNTRSimulator(WaterNetworkSimulator):
                 logger.debug('\t{0}.{1} changed to {2}'.format(obj, attr, getattr(obj, attr)))
 
     def run_sim(self, solver=NewtonSolver, backup_solver=None, solver_options=None,
-                backup_solver_options=None, convergence_error=True, HW_approx='default',
+                backup_solver_options=None, convergence_error=False, HW_approx='default',
                 diagnostics=False):
+
         """
         Run an extended period simulation (hydraulics only).
 
@@ -807,19 +808,19 @@ class WNTRSimulator(WaterNetworkSimulator):
         solver_options: dict
             Solver options are specified using the following dictionary keys:
 
-            * MAXITER: the maximum number of iterations for each hydraulic solve (each timestep and trial) (default = 100)
+            * MAXITER: the maximum number of iterations for each hydraulic solve (each timestep and trial) (default = 3000)
             * TOL: tolerance for the hydraulic equations (default = 1e-6)
             * BT_RHO: the fraction by which the step length is reduced at each iteration of the line search (default = 0.5)
-            * BT_MAXITER: the maximum number of iterations for each line search (default = 20)
+            * BT_MAXITER: the maximum number of iterations for each line search (default = 100)
             * BACKTRACKING: whether or not to use a line search (default = True)
             * BT_START_ITER: the newton iteration at which a line search should start being used (default = 2)
             * THREADS: the number of threads to use in constraint and jacobian computations
         backup_solver_options: dict
         convergence_error: bool (optional)
             If convergence_error is True, an error will be raised if the
-            simulation does not converge. If convergence_error is False,
-            a warning will be issued and results.error_code will be set to 2
-            if the simulation does not converge.  Default = True.
+            simulation does not converge. If convergence_error is False, partial results are returned, 
+            a warning will be issued, and results.error_code will be set to 0
+            if the simulation does not converge.  Default = False.
         HW_approx: str
             Specifies which Hazen-Williams headloss approximation to use. Options are 'default' and 'piecewise'. Please
             see the WNTR documentation on hydraulics for details.
@@ -899,10 +900,10 @@ class WNTRSimulator(WaterNetworkSimulator):
                 solver_status, mesg, iter_count = _solver_helper(self._model, self._backup_solver, self._backup_solver_options)
             if solver_status == 0:
                 if self._convergence_error:
-                    logger.error('Simulation did not converge. ' + mesg)
-                    raise RuntimeError('Simulation did not converge. ' + mesg)
-                warnings.warn('Simulation did not converge. ' + mesg)
-                logger.warning('Simulation did not converge at time ' + str(self._get_time()) + '. ' + mesg)
+                    logger.error('Simulation did not converge at time ' + self._get_time() + '. ' + mesg) 
+                    raise RuntimeError('Simulation did not converge at time ' + self._get_time() + '. ' + mesg)
+                warnings.warn('Simulation did not converge at time ' + self._get_time() + '. ' + mesg)
+                logger.warning('Simulation did not converge at time ' + self._get_time() + '. ' + mesg)
                 results.error_code = wntr.sim.results.ResultsStatus.error
                 diagnostics.run(last_step='solve', next_step='break')
                 break
@@ -924,11 +925,11 @@ class WNTRSimulator(WaterNetworkSimulator):
                 trial += 1
                 if trial > max_trials:
                     if convergence_error:
-                        logger.error('Exceeded maximum number of trials.')
-                        raise RuntimeError('Exceeded maximum number of trials.')
+                        logger.error('Exceeded maximum number of trials at time ' + self._get_time() + '. ') 
+                        raise RuntimeError('Exceeded maximum number of trials at time ' + self._get_time() + '. ' ) 
                     results.error_code = wntr.sim.results.ResultsStatus.error
-                    warnings.warn('Exceeded maximum number of trials.')
-                    logger.warning('Exceeded maximum number of trials at time %s', self._get_time())
+                    warnings.warn('Exceeded maximum number of trials at time ' + self._get_time() + '. ') 
+                    logger.warning('Exceeded maximum number of trials at time ' + self._get_time() + '. ' ) 
                     break
                 continue
 
@@ -962,6 +963,7 @@ class WNTRSimulator(WaterNetworkSimulator):
                 break
 
         wntr.sim.hydraulics.get_results(self._wn, results, node_res, link_res)
+        
         return results
 
     def _initialize_name_id_maps(self):
@@ -995,7 +997,7 @@ class WNTRSimulator(WaterNetworkSimulator):
             cols.append(to_node_id)
             rows.append(to_node_id)
             cols.append(from_node_id)
-            if link.status == wntr.network.LinkStatus.closed:
+            if link.status == wntr.network.LinkStatus.Closed:
                 vals.append(0)
                 vals.append(0)
             else:
@@ -1037,7 +1039,7 @@ class WNTRSimulator(WaterNetworkSimulator):
                     link = self._wn.get_link(link_name)
                     if link.start_node_name == to_node_name or link.end_node_name == to_node_name:
                         tmp_list.append(link)
-                        if link.status != wntr.network.LinkStatus.closed:
+                        if link.status != wntr.network.LinkStatus.Closed:
                             ndx1, ndx2 = ndx_map[link]
                             self._internal_graph.data[ndx1] = 1
                             self._internal_graph.data[ndx2] = 1
@@ -1057,7 +1059,7 @@ class WNTRSimulator(WaterNetworkSimulator):
         for mgr in [self._presolve_controls, self._rules, self._postsolve_controls]:
             for obj, attr in mgr.get_changes():
                 if 'status' == attr:
-                    if obj.status == wntr.network.LinkStatus.closed:
+                    if obj.status == wntr.network.LinkStatus.Closed:
                         ndx1, ndx2 = ndx_map[obj]
                         data[ndx1] = 0
                         data[ndx2] = 0
@@ -1072,7 +1074,7 @@ class WNTRSimulator(WaterNetworkSimulator):
             data[ndx1] = 0
             data[ndx2] = 0
             for link in link_list:
-                if link.status != wntr.network.LinkStatus.closed:
+                if link.status != wntr.network.LinkStatus.Closed:
                     ndx1, ndx2 = ndx_map[link]
                     data[ndx1] = 1
                     data[ndx2] = 1
