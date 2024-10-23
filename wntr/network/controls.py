@@ -2,29 +2,6 @@
 The wntr.network.controls module includes methods to define network controls
 and control actions.  These controls modify parameters in the network during
 simulation.
-
-.. rubric:: Contents
-
-.. autosummary::
-
-    Subject
-    Observer
-    Comparison
-    ControlPriority
-    ControlCondition
-    TimeOfDayCondition
-    SimTimeCondition
-    ValueCondition
-    TankLevelCondition
-    RelativeCondition
-    OrCondition
-    AndCondition
-    BaseControlAction
-    ControlAction
-    ControlBase
-    Control
-    ControlManager
-	
 """
 import math
 import enum
@@ -35,10 +12,10 @@ from .elements import LinkStatus
 import abc
 from wntr.utils.ordered_set import OrderedSet
 from collections import OrderedDict
-from collections.abc import Iterable
 from .elements import Tank, Junction, Valve, Pump, Reservoir, Pipe
 from wntr.utils.doc_inheritor import DocInheritor
 import warnings
+from typing import Hashable, Dict, Any, Tuple, MutableSet, Iterable
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +47,26 @@ logger = logging.getLogger(__name__)
 #    Close check valves/pumps for negative flow
 #    Close pumps without power
 
+def _ensure_iterable(to_check: Any)->Iterable[Any]:
+    """Make sure the input is interable
+
+    Parameters
+    ----------
+    to_check : Any
+        The input to check which can be of any type including None
+
+    Returns
+    -------
+    Iterable[Any]
+        to_check as an iterable object, if None an empty list is returned
+    """
+    if isinstance(to_check, Iterable):
+        to_return = list(to_check)
+    elif to_check is not None:
+        to_return = [to_check]
+    else:
+        to_return = []
+    return to_return
 
 class Subject(object):
     """
@@ -324,7 +321,7 @@ class ControlCondition(six.with_metaclass(abc.ABCMeta, object)):
             if value == 'OPEN':
                 return 1
             if value == 'ACTIVE':
-                return np.nan
+                return 2
             PM = 0
             words = value.split()
             if len(words) > 1:
@@ -343,8 +340,10 @@ class ControlCondition(six.with_metaclass(abc.ABCMeta, object)):
             return v
 
     def _repr_value(self, attr, value):
+        if attr.lower() in ['status'] and isinstance(value, str):
+            return value.upper()
         if attr.lower() in ['status'] and int(value) == value:
-            return LinkStatus(int(value)).name
+            return LinkStatus(int(value)).name.upper()
         return value
 
     @classmethod
@@ -480,7 +479,7 @@ class TimeOfDayCondition(ControlCondition):
                           repr(self._repeat), repr(self._first_day))
 
     def __str__(self):
-        fmt = 'clock_time {:s} "{}"'.format(self._relation.symbol,
+        fmt = 'SYSTEM CLOCKTIME {:s} {}'.format(self._relation.text.upper(),
                                           self._sec_to_clock(self._threshold))
         if not self._repeat:
             fmt = '( ' + ' && clock_day == {} )'.format(self._first_day)
@@ -606,7 +605,7 @@ class SimTimeCondition(ControlCondition):
                           repr(self._repeat), repr(self._first_time))
 
     def __str__(self):
-        fmt = '{} {} sec'.format(self._relation.symbol, self._threshold)
+        fmt = 'SYSTEM TIME {} {}'.format(self._relation.text.upper(), self._sec_to_hours_min_sec(self._threshold))
         if self._repeat is True:
             fmt = '% 86400.0 ' + fmt
         elif self._repeat > 0:
@@ -614,7 +613,7 @@ class SimTimeCondition(ControlCondition):
         if self._first_time > 0:
             fmt = '(sim_time - {:d}) '.format(int(self._first_time)) + fmt
         else:
-            fmt = 'sim_time ' + fmt
+            fmt = '' + fmt
         return fmt
 
     def requires(self):
@@ -729,13 +728,17 @@ class ValueCondition(ControlCondition):
 
     def __str__(self):
         typ = self._source_obj.__class__.__name__
+        if 'Pump' in typ:
+            typ = 'Pump'
+        elif 'Valve' in typ:
+            typ = 'Valve'
         obj = str(self._source_obj)
         if hasattr(self._source_obj, 'name'):
             obj = self._source_obj.name
         att = self._source_attr
-        rel = self._relation.symbol
+        rel = self._relation.text
         val = self._repr_value(att, self._threshold)
-        return "{}('{}').{} {} {}".format(typ, obj, att, rel, val)
+        return "{} {} {} {} {}".format(typ.upper(), obj, att.upper(), rel.upper(), val)
 
     def evaluate(self):
         cur_value = getattr(self._source_obj, self._source_attr)
@@ -746,6 +749,32 @@ class ValueCondition(ControlCondition):
             thresh_value = 0.0
         state = relation(np.round(cur_value,10), np.round(thresh_value,10))
         return bool(state)
+
+
+@DocInheritor({'requires', 'evaluate', 'name'})
+class FunctionCondition(ControlCondition):
+    """
+    A ControlCondition which calls a function to determine
+    if the control needs activated or not. If the function
+    returns True, then the control is activated.
+    """
+    def __init__(self, func, func_kwargs=None, requires=None):
+        super(FunctionCondition, self).__init__()
+        self._func = func
+        if func_kwargs is None:
+            self._func_kwargs = dict()
+        else:
+            self._func_kwargs = func_kwargs
+        if requires is None:
+            self._requires = OrderedSet()
+        else:
+            self._requires = OrderedSet(requires)
+
+    def evaluate(self):
+        return bool(self._func(**self._func_kwargs))
+
+    def requires(self):
+        return self._requires
 
 
 @DocInheritor({'requires', 'evaluate'})
@@ -986,7 +1015,7 @@ class OrCondition(ControlCondition):
         return True
 
     def __str__(self):
-        return "( " + str(self._condition_1) + " || " + str(self._condition_2) + " )"
+        return " " + str(self._condition_1) + " OR " + str(self._condition_2) + " "
 
     def __repr__(self):
         return 'Or({}, {})'.format(repr(self._condition_1), repr(self._condition_2))
@@ -1052,7 +1081,7 @@ class AndCondition(ControlCondition):
         return True
 
     def __str__(self):
-        return "( "+ str(self._condition_1) + " && " + str(self._condition_2) + " )"
+        return " "+ str(self._condition_1) + " AND " + str(self._condition_2) + " "
 
     def __repr__(self):
         return 'And({}, {})'.format(repr(self._condition_1), repr(self._condition_2))
@@ -1676,7 +1705,7 @@ class BaseControlAction(six.with_metaclass(abc.ABCMeta, Subject)):
             return False
         if attr1 != attr2:
             return False
-        if type(val1) == float:
+        if isinstance(val1, float):
             if abs(val1 - val2) > 1e-10:
                 return False
         else:
@@ -1724,14 +1753,14 @@ class ControlAction(BaseControlAction):
         return '<ControlAction: {}, {}, {}>'.format(str(self._target_obj), str(self._attribute), str(self._repr_value()))
 
     def __str__(self):
-        return "set {}('{}').{} to {}".format(self._target_obj.__class__.__name__,
+        return "{} {} {} IS {}".format(self._target_obj.link_type.upper(),
                                        self._target_obj.name,
-                                       self._attribute,
+                                       self._attribute.upper(),
                                        self._repr_value())
 
     def _repr_value(self):
         if self._attribute.lower() in ['status']:
-            return LinkStatus(int(self._value)).name
+            return LinkStatus(int(self._value)).name.upper()
         return self._value
 
     def run_control_action(self):
@@ -1828,7 +1857,6 @@ class ControlBase(six.with_metaclass(abc.ABCMeta, object)):
         self._control_type = None
         self._condition = None
         self._priority = None
-
 
     @abc.abstractmethod
     def is_control_action_required(self):
@@ -1944,23 +1972,11 @@ class Rule(ControlBase):
         name: str
             The name of the control
         """
-        if not isinstance(condition, ControlCondition):
-            raise ValueError('The conditions argument must be a ControlCondition instance')
-        self._condition = condition
-        if isinstance(then_actions, Iterable):
-            self._then_actions = list(then_actions)
-        elif then_actions is not None:
-            self._then_actions = [then_actions]
-        else:
-            self._then_actions = []
-        if isinstance(else_actions, Iterable):
-            self._else_actions = list(else_actions)
-        elif else_actions is not None:
-            self._else_actions = [else_actions]
-        else:
-            self._else_actions = []
+        self.update_condition(condition)
+        self.update_then_actions(then_actions)
+        self.update_else_actions(else_actions)
         self._which = None
-        self._priority = priority
+        self.update_priority(priority)
         self._name = name
         if self._name is None:
             self._name = ''
@@ -1970,6 +1986,21 @@ class Rule(ControlBase):
             if condition._relation is Comparison.eq:
                 logger.warning('Using Comparison.eq with {0} will probably not work!'.format(type(condition)))
                 warnings.warn('Using Comparison.eq with {0} will probably not work!'.format(type(condition)))
+
+    def to_dict(self):
+        ret = dict()
+        if self._control_type == _ControlType.rule:
+            ret['type'] = 'rule'
+            ret['name'] = str(self._name)
+            ret['condition'] = str(self._condition)
+            ret['then_actions'] = [str(a) for a in self._then_actions]
+            ret['else_actions'] = [str(a) for a in self._else_actions]
+            ret['priority'] = int(self._priority)
+        else:
+            ret['type'] = 'simple'
+            ret['condition'] = str(self._condition)
+            ret['then_actions'] = [str(a) for a in self._then_actions]
+        return ret
 
     @property
     def epanet_control_type(self):
@@ -2008,25 +2039,25 @@ class Rule(ControlBase):
         return fmt.format(self._name, repr(self._condition), repr(self._then_actions), repr(self._else_actions), self._priority)
 
     def __str__(self):
-        text = '{} {} := if {}'.format(self._control_type_str(), self._name, self._condition)
+        text = 'IF {}'.format(str(self._condition))
         if self._then_actions is not None and len(self._then_actions) > 0:
-            then_text = ' then '
+            then_text = ' THEN '
             for ct, act in enumerate(self._then_actions):
                 if ct == 0:
                     then_text += str(act)
                 else:
-                    then_text += ' and {}'.format(str(act))
+                    then_text += ' AND {}'.format(str(act))
             text += then_text
         if self._else_actions is not None and len(self._else_actions) > 0:
-            else_text = ' else '
+            else_text = ' ELSE '
             for ct, act in enumerate(self._else_actions):
                 if ct == 0:
                     else_text += str(act)
                 else:
-                    else_text += ' and {}'.format(str(act))
+                    else_text += ' AND {}'.format(str(act))
             text += else_text
         if self._priority is not None and self._priority >= 0:
-            text += ' with priority {}'.format(self._priority)
+            text += ' PRIORITY {}'.format(self._priority)
         return text
 
     def is_control_action_required(self):
@@ -2050,13 +2081,80 @@ class Rule(ControlBase):
                 control_action.run_control_action()
         else:
             raise RuntimeError('control actions called even though if-then statement was False')
+    
+    def update_condition(self, condition:ControlCondition):
+        """Update the controls condition in place
+
+        Parameters
+        ----------
+        condition : ControlCondition
+            The new condition for this control to use
+
+        Raises
+        ------
+        ValueError
+            If the provided condition isn't a valid ControlCondition
+        """
+        try:
+            logger.info(f"Replacing {self._condition} with {condition}")
+        except AttributeError:
+            # Occurs during intialisation
+            pass
+        if not isinstance(condition, ControlCondition):
+            raise ValueError('The conditions argument must be a ControlCondition instance')
+        self._condition = condition
+
+    def update_then_actions(self, then_actions:Iterable[ControlAction]):
+        """Update the controls then_actions in place
+
+        Parameters
+        ----------
+        then_actions : Iterable[ControlAction]
+            The new then_actions for this control to use
+        """        
+        try:
+            logger.info(f"Replacing {self._then_actions} with {then_actions}")        
+        except AttributeError:
+            # Occurs during intialisation
+            pass
+        self._then_actions = _ensure_iterable(then_actions)
+
+    def update_else_actions(self, else_actions:Iterable[ControlAction]):
+        """Update the controls else_actions in place
+
+        Parameters
+        ----------
+        else_actions : Iterable[ControlAction]
+            The new else_actions for this control to use
+        """
+        try:
+            logger.info(f"Replacing {self._else_actions} with {else_actions}")
+        except AttributeError:
+            # Occurs during intialisation
+            pass
+        self._else_actions = _ensure_iterable(else_actions)
+    
+    def update_priority(self, priority:ControlPriority):
+        """Update the controls priority in place
+
+        Parameters
+        ----------
+        priority : ControlPriority
+            The new priority for this control to use
+        """
+        try:
+            logger.info(f"Replacing {self._priority} with {priority}")
+        except AttributeError:
+            # Occurs during intialisation
+            pass
+        self._priority = priority
 
 
 class Control(Rule):
     """
     A class for controls.
     """
-    def __init__(self, condition, then_action, priority=ControlPriority.medium, name=None):
+    def __init__(self, condition, then_action: BaseControlAction, priority=ControlPriority.medium, name=None):
         """
         Parameters
         ----------
@@ -2064,21 +2162,14 @@ class Control(Rule):
             The condition that should be used to determine when the actions need to be activated. When the condition
             evaluates to True, the then_actions are activated. When the condition evaluates to False, the else_actions
             are activated.
-        then_action: ControlAction
+        then_action: BaseControlAction
             The action that should be activated when the condition evaluates to True.
         priority: ControlPriority
             The priority of the control. Default is ControlPriority.medium
         name: str
             The name of the control
         """
-        self._condition = condition
-        self._then_actions = [then_action]
-        self._else_actions = []
-        self._which = None
-        self._priority = priority
-        self._name = name
-        if self._name is None:
-            self._name = ''
+        super().__init__(condition=condition, then_actions=then_action, priority=priority, name=name)
         if isinstance(condition, TankLevelCondition):
             self._control_type = _ControlType.pre_and_postsolve
         elif isinstance(condition, (TimeOfDayCondition, SimTimeCondition)):
@@ -2155,19 +2246,35 @@ class Control(Rule):
         return control
 
 
-class ControlManager(Observer):
-    """
-    A class for managing controls and identifying changes made by those controls.
-    """
+class ControlChangeTracker(Observer):
     def __init__(self):
-        self._controls = OrderedSet()
-        """OrderedSet of ControlBase"""
+        self._actions = dict()
+        self._previous_values: Dict[Any, Dict[Tuple[Any, str], Any]] = dict()  # {key: {(obj, attr): value}}
+        self._changed: Dict[Any, MutableSet[Tuple[Any, str]]] = dict()  # {key: set of (obj, attr) that has been changed from _previous_values}
 
-        self._previous_values = OrderedDict()  # {(obj, attr): value}
-        self._changed = OrderedSet()  # set of (obj, attr) that has been changed from _previous_values
+    def clear_all_reference_points(self):
+        self._previous_values = dict()
+        self._changed = dict()
 
-    def __iter__(self):
-        return iter(self._controls)
+    def _set_reference_point(self, key):
+        self._previous_values[key] = dict()
+        self._changed[key] = OrderedSet()
+
+        for action in self._actions.keys():
+            obj, attr = action.target()
+            self._previous_values[key][(obj, attr)] = getattr(obj, attr)
+
+    def set_reference_point(self, key):
+        if key in self._previous_values:
+            raise ValueError(f'The ControlChangeTracker already has reference point {key}')
+        self._set_reference_point(key)
+
+    def reset_reference_point(self, key):
+        self._set_reference_point(key)
+
+    def remove_reference_point(self, key):
+        del self._previous_values[key]
+        del self._changed[key]
 
     def update(self, subject):
         """
@@ -2177,39 +2284,31 @@ class ControlManager(Observer):
         -----------
         subject: BaseControlAction
         """
-        obj, attr = subject.target()
-        if getattr(obj, attr) == self._previous_values[(obj, attr)]:
-            self._changed.discard((obj, attr))
-        else:
-            self._changed.add((obj, attr))
+        obj_attr = subject.target()
+        val = getattr(*obj_attr)
+        for ref_point in self._previous_values.keys():
+            if val == self._previous_values[ref_point][obj_attr]:
+                self._changed[ref_point].discard(obj_attr)
+            else:
+                self._changed[ref_point].add(obj_attr)
 
     def register_control(self, control):
         """
-        Register a control with the ControlManager
+        Register a control
 
         Parameters
         ----------
         control: ControlBase
         """
-        self._controls.add(control)
+        if len(self._previous_values) != 0:
+            raise RuntimeError('Please call clear_reference_points() before registering more controls')
         for action in control.actions():
+            if action not in self._actions:
+                self._actions[action] = OrderedSet()
+            self._actions[action].add(control)
             action.subscribe(self)
-            obj, attr = action.target()
-            self._previous_values[(obj, attr)] = getattr(obj, attr)
 
-    def reset(self):
-        """
-        Reset the _previous_values. This should be called before activating any control actions so that changes made
-        by the control actions can be tracked.
-        """
-        self._changed = OrderedSet()
-        self._previous_values = OrderedDict()
-        for control in self._controls:
-            for action in control.actions():
-                obj, attr = action.target()
-                self._previous_values[(obj, attr)] = getattr(obj, attr)
-
-    def changes_made(self):
+    def changes_made(self, ref_point):
         """
         Specifies if changes were made.
 
@@ -2217,9 +2316,9 @@ class ControlManager(Observer):
         -------
         changes: bool
         """
-        return len(self._changed) > 0
+        return len(self._changed[ref_point]) > 0
 
-    def get_changes(self):
+    def get_changes(self, ref_point):
         """
         A generator for iterating over the objects, attributes that were changed.
 
@@ -2228,23 +2327,56 @@ class ControlManager(Observer):
         changes: tuple
             (object, attr)
         """
-        for obj, attr in self._changed:
+        for obj, attr in self._changed[ref_point]:
             yield obj, attr
 
     def deregister(self, control):
         """
-        Deregister a control with the ControlManager
+        Deregister a control
+
+        Parameters
+        ----------
+        control: ControlBase
+        """
+        for action in control.actions():
+            self._actions[action].discard(control)
+            if len(self._actions[action]) == 0:
+                action.unsubscribe(self)
+                del self._actions[action]
+
+                obj_attr = action.target()
+                for ref_point in self._previous_values.keys():
+                    self._previous_values[ref_point].pop(obj_attr)
+                    self._changed[ref_point].discard(obj_attr)
+
+
+class ControlChecker(object):
+    def __init__(self):
+        self._controls = OrderedSet()
+        """OrderedSet of ControlBase"""
+
+    def __iter__(self):
+        return iter(self._controls)
+
+    def register_control(self, control):
+        """
+        Register a control
+
+        Parameters
+        ----------
+        control: ControlBase
+        """
+        self._controls.add(control)
+
+    def deregister(self, control):
+        """
+        Deregister a control
 
         Parameters
         ----------
         control: ControlBase
         """
         self._controls.remove(control)
-        for action in control.actions():
-            action.unsubscribe(self)
-            obj, attr = action.target()
-            self._previous_values.pop((obj, attr))
-            self._changed.discard((obj, attr))
 
     def check(self):
         """

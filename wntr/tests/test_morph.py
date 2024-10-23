@@ -20,13 +20,18 @@ class TestMorph(unittest.TestCase):
         wn = wntr.network.WaterNetworkModel(inp_file)
         node = wn.get_node("123")
         coord = node.coordinates
+        vertex = (8.5, 27)
+        wn.get_link('10').vertices.append(vertex)
 
         wn2 = wntr.morph.scale_node_coordinates(wn, 100)
         node2 = wn2.get_node("123")
         coord2 = node2.coordinates
+        vertex2 = wn2.get_link('10').vertices[0]
 
         self.assertEqual(coord[0] * 100, coord2[0])
         self.assertEqual(coord[1] * 100, coord2[1])
+        self.assertEqual(vertex[0] * 100, vertex2[0])
+        self.assertEqual(vertex[1] * 100, vertex2[1])
 
     def test_translate_node_coordinates(self):
 
@@ -34,25 +39,37 @@ class TestMorph(unittest.TestCase):
         wn = wntr.network.WaterNetworkModel(inp_file)
         node = wn.get_node("123")
         coord = node.coordinates
+        vertex = (8.5, 27)
+        wn.get_link('10').vertices.append(vertex)
 
         wn2 = wntr.morph.translate_node_coordinates(wn, 5, 10)
         node2 = wn2.get_node("123")
         coord2 = node2.coordinates
+        vertex2 = wn2.get_link('10').vertices[0]
 
         self.assertEqual(coord[0] + 5, coord2[0])
         self.assertEqual(coord[1] + 10, coord2[1])
+        self.assertEqual(vertex[0] + 5, vertex2[0])
+        self.assertEqual(vertex[1] + 10, vertex2[1])
 
     def test_rotate_node_coordinates(self):
 
         wn = wntr.network.WaterNetworkModel()
         wn.add_junction("J1", base_demand=5, elevation=100.0, coordinates=(2, 0))
+        wn.add_junction("J2", base_demand=5, elevation=100.0, coordinates=(8, 0))
+        wn.add_pipe("P1", "J1", "J2")
+        vertex = (4, 0)
+        wn.get_link('P1').vertices.append(vertex)
 
         wn2 = wntr.morph.rotate_node_coordinates(wn, 45)
         node2 = wn2.get_node("J1")
         coord2 = node2.coordinates
+        vertex2 = wn2.get_link('P1').vertices[0]
 
         self.assertAlmostEqual(np.sqrt(2), coord2[0], 6)
         self.assertAlmostEqual(np.sqrt(2), coord2[1], 6)
+        self.assertAlmostEqual(vertex[0] * np.sqrt(2) / 2, vertex2[0])
+        self.assertAlmostEqual(vertex[0] * np.sqrt(2) / 2 , vertex2[1])
 
     def test_UTM_to_longlat_to_UTM(self):
 
@@ -60,25 +77,39 @@ class TestMorph(unittest.TestCase):
         wn.add_junction(
             "J1", base_demand=5, elevation=100.0, coordinates=(351521.07, 3886097.33)
         )  # easting, northing
+        wn.add_junction(
+            "J2", base_demand=5, elevation=100.0, coordinates=(351700.00, 3886097.33)
+        )
+        wn.add_pipe("P1", "J1", "J2")
+        vertex = (351600.00, 3886097.33)
+        wn.get_link('P1').vertices.append(vertex)
 
         wn2 = wntr.morph.convert_node_coordinates_UTM_to_longlat(wn, 13, "S")
         node2 = wn2.get_node("J1")
         coord2 = node2.coordinates
+        vertex2 = wn2.get_link('P1').vertices[0]
 
         self.assertAlmostEqual(-106.629181, coord2[0], 6)  # longitude
         self.assertAlmostEqual(35.106766, coord2[1], 6)  # latitude
+        self.assertAlmostEqual(-106.628315, vertex2[0], 6)  # longitude
+        self.assertAlmostEqual(35.106778, vertex2[1], 6)  # latitude
 
         wn3 = wntr.morph.convert_node_coordinates_longlat_to_UTM(wn2)
         node3 = wn3.get_node("J1")
         coord3 = node3.coordinates
+        vertex3 = wn3.get_link('P1').vertices[0]
 
         self.assertAlmostEqual(351521.07, coord3[0], 1)  # easting
         self.assertAlmostEqual(3886097.33, coord3[1], 1)  # northing
+        self.assertAlmostEqual(351600.00, vertex3[0], 1)  # easting
+        self.assertAlmostEqual(3886097.33, vertex3[1], 1)  # northing
 
     def test_convert_node_coordinates_to_longlat(self):
 
         inp_file = join(netdir, "Net3.inp")
         wn = wntr.network.WaterNetworkModel(inp_file)
+        vertex = (8.5, 27)
+        wn.get_link('10').vertices.append(vertex)
 
         longlat_map = {"Lake": (-106.6587, 35.0623), "219": (-106.5248, 35.191)}
         wn2 = wntr.morph.convert_node_coordinates_to_longlat(wn, longlat_map)
@@ -87,6 +118,9 @@ class TestMorph(unittest.TestCase):
             coord = node.coordinates
             self.assertAlmostEqual(longlat_map[node_name][0], coord[0], 4)
             self.assertAlmostEqual(longlat_map[node_name][1], coord[1], 4)
+        vertex2 = wn2.get_link('10').vertices[0]
+        self.assertAlmostEqual(-106.6555, vertex2[0], 4)
+        self.assertAlmostEqual(35.0638, vertex2[1], 4)
 
         # opposite rotation
         longlat_map = {"Lake": (-106.6851, 35.1344), "219": (-106.5073, 35.0713)}
@@ -96,6 +130,9 @@ class TestMorph(unittest.TestCase):
             coord = node.coordinates
             self.assertAlmostEqual(longlat_map[node_name][0], coord[0], 4)
             self.assertAlmostEqual(longlat_map[node_name][1], coord[1], 4)
+        vertex2 = wn2.get_link('10').vertices[0]
+        self.assertAlmostEqual(-106.6826, vertex2[0], 4)
+        self.assertAlmostEqual(35.1325, vertex2[1], 4)
 
     def test_split_pipe(self):
 
@@ -124,7 +161,7 @@ class TestMorph(unittest.TestCase):
         self.assertEqual(pipe.roughness, pipeB.roughness)
         self.assertEqual(pipe.minor_loss, pipeB.minor_loss)
         self.assertEqual(pipe.initial_status, pipeB.initial_status)
-
+    
     def test_break_pipe(self):
 
         inp_file = join(datadir, "leaks.inp")
@@ -157,6 +194,42 @@ class TestMorph(unittest.TestCase):
         self.assertEqual(pipe.minor_loss, pipeB.minor_loss)
         self.assertEqual(pipe.initial_status, pipeB.initial_status)
 
+    def test_split_break_pipe_vertices(self):
+
+        inp_file = join(datadir, "io.inp")
+        wn = wntr.network.WaterNetworkModel(inp_file)
+        
+        wn2 = wntr.morph.split_pipe(wn, "p1", "p1__new", "new_junc")
+        pipe = wn2.get_link("p1")
+        pipeB = wn2.get_link("p1__new")
+        self.assertEqual(len(pipe.vertices), 0)
+        self.assertEqual(len(pipeB.vertices), 2)
+        
+        wn2 = wntr.morph.split_pipe(wn, "p1", "p1__new", "new_junc", split_at_point=0.7)
+        pipe = wn2.get_link("p1")
+        pipeB = wn2.get_link("p1__new")
+        self.assertEqual(pipe.vertices, [(15.0, 5.0)])
+        self.assertEqual(pipeB.vertices, [(20.0, 5.0)])
+        
+        wn2 = wntr.morph.split_pipe(wn, "p1", "p1__new", "new_junc", split_at_point=0.9)
+        pipe = wn2.get_link("p1")
+        pipeB = wn2.get_link("p1__new")
+        self.assertEqual(len(pipe.vertices), 2)
+        self.assertEqual(len(pipeB.vertices), 0)
+
+    def test_reverse_pipes(self):
+        inp_file = join(datadir, "io.inp")
+        wn = wntr.network.WaterNetworkModel(inp_file)
+        wn2 = wntr.morph.link.reverse_link(wn, "p1")
+        pipe2 = wn2.get_link("p1")
+
+        # test start and end nodes
+        self.assertEqual(pipe2.start_node, wn2.get_node('j1'))
+        self.assertEqual(pipe2.end_node, wn2.get_node('t1'))
+
+        # test vertices
+        self.assertEqual(pipe2.vertices, [(20.0, 5.0), (15.0, 5.0)])
+
     def test_skeletonize(self):
 
         inp_file = join(datadir, "skeletonize.inp")
@@ -184,7 +257,7 @@ class TestMorph(unittest.TestCase):
 
             # Write skel_wn to an inp file, read it back in, then extract the demands
             skel_inp_file = "temp.inp"
-            skel_wn.write_inpfile(skel_inp_file, "GPM")
+            wntr.network.write_inpfile(skel_wn, skel_inp_file, "GPM")
             skel_wn_io = wntr.network.WaterNetworkModel(skel_inp_file)
             demand_io = wntr.metrics.expected_demand(skel_wn_io)
             total_demand_io = demand_io.loc[0, :].sum()
@@ -222,7 +295,13 @@ class TestMorph(unittest.TestCase):
 
         inp_file = join(datadir, "skeletonize.inp")
         wn = wntr.network.WaterNetworkModel(inp_file)
-
+        
+        # Run skeletonization without excluding junctions or pipes
+        skel_wn = wntr.morph.skeletonize(wn, 12.0 * 0.0254, use_epanet=False)
+        # Junction 13 and Pipe 60 are not in the skeletonized model
+        assert "13" not in skel_wn.junction_name_list
+        assert "60" not in skel_wn.pipe_name_list
+        
         # add control to a link
         action = wntr.network.ControlAction(
             wn.get_link("60"), "status", wntr.network.LinkStatus.Closed
@@ -237,21 +316,46 @@ class TestMorph(unittest.TestCase):
         control = wntr.network.Control(condition=condition, then_action=action)
         wn.add_control("raise_node", control)
 
+        # Rerun skeletonize
         skel_wn = wntr.morph.skeletonize(wn, 12.0 * 0.0254, use_epanet=False)
-
+        assert "13" in skel_wn.junction_name_list
+        assert "60" in skel_wn.pipe_name_list
         self.assertEqual(skel_wn.num_nodes, wn.num_nodes - 17)
         self.assertEqual(skel_wn.num_links, wn.num_links - 22)
 
-        wn = wntr.network.WaterNetworkModel(inp_file)
+    def test_skeletonize_with_excluding_nodes_and_pipes(self):
 
-        # Change link 60 and 11 diameter to > 12, should get some results as above
+        inp_file = join(datadir, "skeletonize.inp")
+        wn = wntr.network.WaterNetworkModel(inp_file)
+        
+        # Run skeletonization without excluding junctions or pipes
+        skel_wn = wntr.morph.skeletonize(wn, 12.0 * 0.0254, use_epanet=False)
+        # Junction 13 and Pipe 60 are not in the skeletonized model
+        assert "13" not in skel_wn.junction_name_list
+        assert "60" not in skel_wn.pipe_name_list
+        
+        # Run skeletonization excluding Junction 13 and Pipe 60
+        skel_wn = wntr.morph.skeletonize(wn, 12.0 * 0.0254, use_epanet=False, 
+                                         junctions_to_exclude=["13"], 
+                                         pipes_to_exclude=["60"])
+        # Junction 13 and Pipe 60 are in the skeletonized model
+        assert "13" in skel_wn.junction_name_list
+        assert "60" in skel_wn.pipe_name_list
+        self.assertEqual(skel_wn.num_nodes, wn.num_nodes - 17)
+        self.assertEqual(skel_wn.num_links, wn.num_links - 22)
+
+        # Change diameter of link 60 one link connected to Junction 13 to be 
+        # greater than 12, should get some results as above
+        # Note, link 11 is connected to Junction 13
         link = wn.get_link("60")
         link.diameter = 16 * 0.0254
-        link = wn.get_link("11")
+        link_connected_to_13 = wn.get_links_for_node('13')[0]
+        link = wn.get_link(link_connected_to_13)
         link.diameter = 16 * 0.0254
 
         skel_wn = wntr.morph.skeletonize(wn, 12.0 * 0.0254, use_epanet=False)
-
+        assert "13" in skel_wn.junction_name_list
+        assert "60" in skel_wn.pipe_name_list
         self.assertEqual(skel_wn.num_nodes, wn.num_nodes - 17)
         self.assertEqual(skel_wn.num_links, wn.num_links - 22)
 

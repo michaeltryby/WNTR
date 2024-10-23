@@ -1,15 +1,10 @@
 """
 The wntr.network.layer module includes methods to generate network layers
 (information that is not stored in the water network model or the graph).
-
-.. rubric:: Contents
-
-.. autosummary::
-
-    generate_valve_layer
 """
 import numpy as np
 import pandas as pd
+import random
 
 def generate_valve_layer(wn, placement_type='strategic', n=1, seed=None):
     """
@@ -35,7 +30,7 @@ def generate_valve_layer(wn, placement_type='strategic', n=1, seed=None):
           contain a valve.
         - If 'random', n is the number of number of randomly placed valves.
         
-    seed : int or float
+    seed : int or None
         Random seed
        
     Returns
@@ -48,12 +43,17 @@ def generate_valve_layer(wn, placement_type='strategic', n=1, seed=None):
     
     if seed is not None:
         np.random.seed(seed)
-    
+        random.seed(seed)
     valve_layer = []
     if placement_type=='random':
-        for pipe_name in np.random.choice(wn.pipe_name_list, n):
-            pipe = wn.get_link(pipe_name)
-            valve_layer.append([pipe_name, pipe.start_node_name])
+        all_valves = []
+        for pipe_name, pipe in wn.pipes():
+            all_valves.append((pipe_name, pipe.start_node_name))
+            all_valves.append((pipe_name, pipe.end_node_name))
+
+        for valve_tuple in random.sample(all_valves, n):
+            pipe_name, node_name = valve_tuple
+            valve_layer.append([pipe_name, node_name])
             
     elif placement_type == 'strategic':
         for node_name, node in wn.nodes():

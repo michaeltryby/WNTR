@@ -47,7 +47,7 @@ def plot_network(wn, node_attribute=None, link_attribute=None, title=None,
                node_size=20, node_range=[None,None], node_alpha=1, node_cmap=None, node_labels=False,
                link_width=1, link_range=[None,None], link_alpha=1, link_cmap=None, link_labels=False,
                add_colorbar=True, node_colorbar_label='Node', link_colorbar_label='Link', 
-               directed=False, ax=None, filename=None):
+               directed=False, ax=None, show_plot=True, filename=None):
     """
     Plot network graphic
 	
@@ -85,7 +85,7 @@ def plot_network(wn, node_attribute=None, link_attribute=None, title=None,
         Node size 
 
     node_range: list, optional
-        Node range ([None,None] indicates autoscale)
+        Node color range ([None,None] indicates autoscale)
         
     node_alpha: int, optional
         Node transparency
@@ -100,7 +100,7 @@ def plot_network(wn, node_attribute=None, link_attribute=None, title=None,
         Link width
 		
     link_range : list, optional
-        Link range ([None,None] indicates autoscale)
+        Link color range ([None,None] indicates autoscale)
 		
     link_alpha : int, optional
         Link transparency
@@ -127,6 +127,9 @@ def plot_network(wn, node_attribute=None, link_attribute=None, title=None,
         Axes for plotting (None indicates that a new figure with a single 
         axes will be used)
     
+    show_plot: bool, optional
+        If True, show plot with plt.show()
+    
     filename : str, optional
         Filename used to save the figure
         
@@ -140,7 +143,7 @@ def plot_network(wn, node_attribute=None, link_attribute=None, title=None,
         ax = plt.gca()
         
     # Graph
-    G = wn.get_graph()
+    G = wn.to_graph()
     if not directed:
         G = G.to_undirected()
 
@@ -212,7 +215,7 @@ def plot_network(wn, node_attribute=None, link_attribute=None, title=None,
             nodelist=nodelist, node_color=nodecolor, node_size=node_size, 
             alpha=node_alpha, cmap=node_cmap, vmin=node_range[0], vmax = node_range[1], 
             linewidths=0, ax=ax)
-    edges = nx.draw_networkx_edges(G, pos, edgelist=linklist, 
+    edges = nx.draw_networkx_edges(G, pos, edgelist=linklist, arrows=directed,
             edge_color=linkcolor, width=link_width, alpha=link_alpha, edge_cmap=link_cmap, 
             edge_vmin=link_range[0], edge_vmax=link_range[1], ax=ax)
     if node_labels:
@@ -228,21 +231,27 @@ def plot_network(wn, node_attribute=None, link_attribute=None, title=None,
         clb = plt.colorbar(nodes, shrink=0.5, pad=0, ax=ax)
         clb.ax.set_title(node_colorbar_label, fontsize=10)
     if add_link_colorbar and link_attribute:
-        if directed:
-            vmin = min(map(abs,link_attribute.values()))
-            vmax = max(map(abs,link_attribute.values())) 
-            sm = plt.cm.ScalarMappable(cmap=link_cmap, norm=plt.Normalize(vmin=vmin, vmax=vmax))
-            sm.set_array([])
-            clb = plt.colorbar(sm, shrink=0.5, pad=0.05, ax=ax)
+        if link_range[0] is None:
+            vmin = min(link_attribute.values())
         else:
-            clb = plt.colorbar(edges, shrink=0.5, pad=0.05, ax=ax)
+            vmin = link_range[0]
+        if link_range[1] is None:
+            vmax = max(link_attribute.values())
+        else:
+            vmax = link_range[1]
+        sm = plt.cm.ScalarMappable(cmap=link_cmap, norm=plt.Normalize(vmin=vmin, vmax=vmax))
+        sm.set_array([])
+        clb = plt.colorbar(sm, shrink=0.5, pad=0.05, ax=ax)
         clb.ax.set_title(link_colorbar_label, fontsize=10)
         
     ax.axis('off')
     
     if filename:
         plt.savefig(filename)
-        
+    
+    if show_plot is True:
+        plt.show(block=False)
+    
     return ax
 
 def plot_interactive_network(wn, node_attribute=None, node_attribute_name = 'Value', title=None,
@@ -251,7 +260,8 @@ def plot_interactive_network(wn, node_attribute=None, node_attribute_name = 'Val
                figsize=[700, 450], round_ndigits=2, add_to_node_popup=None, 
                filename='plotly_network.html', auto_open=True):
     """
-    Create an interactive scalable network graphic using plotly.  
+    Create an interactive scalable network graphic using plotly. 
+
     Parameters
     ----------
     wn : wntr WaterNetworkModel
@@ -312,7 +322,7 @@ def plot_interactive_network(wn, node_attribute=None, node_attribute_name = 'Val
         raise ImportError('plotly is required')
         
     # Graph
-    G = wn.get_graph()
+    G = wn.to_graph()
     
     # Node attribute
     if node_attribute is not None:
@@ -432,7 +442,8 @@ def plot_leaflet_network(wn, node_attribute=None, link_attribute=None,
                add_to_node_popup=None, add_to_link_popup=None,
                filename='leaflet_network.html'):
     """
-    Create an interactive scalable network graphic on a Leaflet map using folium.  
+    Create an interactive scalable network graphic on a Leaflet map using folium.
+
     Parameters
     ----------
     wn : wntr WaterNetworkModel
@@ -545,7 +556,7 @@ def plot_leaflet_network(wn, node_attribute=None, link_attribute=None,
             link_colors, link_bins  = pd.qcut(link_attribute, len(link_cmap), 
                                               labels=link_cmap, retbins =True)
         
-    G = wn.get_graph()
+    G = wn.to_graph()
     pos = nx.get_node_attributes(G,'pos')
     center = pd.DataFrame(pos).mean(axis=1)
     
@@ -665,6 +676,7 @@ def network_animation(wn, node_attribute=None, link_attribute=None, title=None,
                add_colorbar=True, directed=False, ax=None, repeat=True):
     """
     Create a network animation
+    
     Parameters
     ----------
     wn : wntr WaterNetworkModel
@@ -764,7 +776,7 @@ def network_animation(wn, node_attribute=None, link_attribute=None, title=None,
     ax = plot_network(wn, node_attribute=initial_node_values, link_attribute=initial_link_values, title=title_name,
                node_size=node_size, node_range=node_range, node_alpha=node_alpha, node_cmap=node_cmap, node_labels=node_labels,
                link_width=link_width, link_range=link_range, link_alpha=link_alpha, link_cmap=link_cmap, link_labels=link_labels,
-               add_colorbar=add_colorbar, directed=directed, ax=ax)
+               add_colorbar=add_colorbar, directed=directed, ax=ax, show_plot=False)
         
     def update(n):
         if node_attribute is not None:
@@ -788,7 +800,7 @@ def network_animation(wn, node_attribute=None, link_attribute=None, title=None,
         ax = plot_network(wn, node_attribute=node_values, link_attribute=link_values, title=title_name,
                node_size=node_size, node_range=node_range, node_alpha=node_alpha, node_cmap=node_cmap, node_labels=node_labels,
                link_width=link_width, link_range=link_range, link_alpha=link_alpha, link_cmap=link_cmap, link_labels=link_labels,
-               add_colorbar=add_colorbar, directed=directed, ax=ax)
+               add_colorbar=add_colorbar, directed=directed, ax=ax, show_plot=False)
         
         return ax
     

@@ -1,15 +1,5 @@
 """
 The wntr.metrics.economic module contains economic metrics.
-
-.. rubric:: Contents
-
-.. autosummary::
-
-    annual_network_cost
-    annual_ghg_emissions
-    pump_energy
-
-
 """
 from wntr.network import Tank, Pipe, Pump, Valve
 import numpy as np 
@@ -22,17 +12,20 @@ logger = logging.getLogger(__name__)
 def annual_network_cost(wn, tank_cost=None, pipe_cost=None, prv_cost=None, 
                         pump_cost=None):
     """ 
-    Compute annual network cost [SOKZ12]_.
+    Compute annual network cost :cite:p:`sokz12`.
     
     Use the closest value from the lookup tables to compute annual cost for each 
     component in the network.
     
     Parameters
     ----------
-    wn: wntr.network.WaterNetworkModel
+    wn : wntr WaterNetworkModel
+        Water network model. The water network model is needed to 
+        define tank volume, pipe and valve diameter, and pump power conditions.
+    
     tank_cost : pandas Series, optional
         Annual tank cost indexed by volume 
-        (default values below, from [SOKZ12]_).
+        (default values below, from :cite:p:`sokz12`).
     
         =============  ================================
         Volume (m3)    Annual Cost ($/yr) 
@@ -47,7 +40,7 @@ def annual_network_cost(wn, tank_cost=None, pipe_cost=None, prv_cost=None,
     
     pipe_cost : pandas Series, optional
         Annual pipe cost per pipe length indexed by diameter
-        (default values below, from [SOKZ12]_).
+        (default values below, from :cite:p:`sokz12`).
     
         =============  =============  ================================
         Diameter (in)   Diameter (m)  Annual Cost ($/m/yr) 
@@ -68,7 +61,7 @@ def annual_network_cost(wn, tank_cost=None, pipe_cost=None, prv_cost=None,
         
     prv_cost : pandas Series, optional
         Annual PRV valve cost indexed by diameter 
-        (default values below, from [SOKZ12]_).
+        (default values below, from :cite:p:`sokz12`).
         
         =============  =============  ================================
         Diameter (in)   Diameter (m)  Annual Cost ($/m/yr) 
@@ -89,7 +82,7 @@ def annual_network_cost(wn, tank_cost=None, pipe_cost=None, prv_cost=None,
     
     pump_cost : pd.Series, optional
         Annual pump cost indexed by maximum power input to pump
-        (default values below, from [SOKZ12]_).
+        (default values below, from :cite:p:`sokz12`).
         Maximum Power for a HeadPump is computed from the pump curve
         as follows:
         
@@ -200,19 +193,23 @@ def annual_network_cost(wn, tank_cost=None, pipe_cost=None, prv_cost=None,
 
 def annual_ghg_emissions(wn, pipe_ghg=None):
     """ 
-    Compute annual greenhouse gas emissions [SOKZ12]_.
+    Compute annual greenhouse gas emissions :cite:p:`sokz12`.
     
     Use the closest value in the lookup table to compute annual GHG emissions 
     for each pipe in the network.
     
     Parameters
     ----------
+    wn : wntr WaterNetworkModel
+        Water network model. The water network model is needed to 
+        define pipe diameter.
+    
     pipe_ghg : pandas Series, optional
         Annual GHG emissions indexed by pipe diameter
-        (default values below, from [SOKZ12]_).
+        (default values below, from :cite:p:`sokz12`).
         
         =============  ================================
-        Diameter (mm)  Annualised EE (kg-CO2-e/m/yr)
+        Diameter (mm)  Annualized EE (kg-CO2-e/m/yr)
         =============  ================================
         102             5.90
         152             9.71
@@ -265,7 +262,7 @@ def pump_power(flowrate, head, wn):
     Parameters
     ----------
     flowrate : pandas DataFrame
-        A pandas Dataframe containing pump flowrates 
+        A pandas DataFrame containing pump flowrates 
         (index = times, columns = pump names).
     
     head : pandas DataFrame
@@ -325,7 +322,7 @@ def pump_energy(flowrate, head, wn):
     Parameters
     ----------
     flowrate : pandas DataFrame
-        A pandas Dataframe containing pump flowrates 
+        A pandas DataFrame containing pump flowrates 
         (index = times, columns = pump names).
     
     head : pandas DataFrame
@@ -386,7 +383,7 @@ def pump_cost(energy, wn):
             else:
                 raise NotImplementedError('WNTR does not support price patterns yet.')
         elif pump.energy_pattern is None:
-            if wn.energy.global_pattern is None:
+            if wn.options.energy.global_pattern is None:
                 price_dict[pump_name] = [pump.energy_price for i in time]
             else:
                 raise NotImplementedError('WNTR does not support price patterns yet.')

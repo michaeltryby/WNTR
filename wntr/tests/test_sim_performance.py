@@ -1,6 +1,10 @@
 import sys
 import unittest
+import pytest
 from os.path import abspath, dirname, join
+import threading
+import time
+import numpy as np
 
 import pandas
 
@@ -9,7 +13,6 @@ pandas.set_option("display.max_rows", 10000)
 testdir = dirname(abspath(str(__file__)))
 test_datadir = join(testdir, "networks_for_testing")
 ex_datadir = join(testdir, "..", "..", "examples", "networks")
-results_dir = join(testdir, "performance_results")
 
 
 def compare_results(wntr_res, epa_res, abs_threshold, rel_threshold):
@@ -27,7 +30,6 @@ def compare_results(wntr_res, epa_res, abs_threshold, rel_threshold):
 class TestPerformance(unittest.TestCase):
     @classmethod
     def setUpClass(self):
-        sys.path.append(results_dir)
         import wntr
 
         self.wntr = wntr
@@ -59,7 +61,7 @@ class TestPerformance(unittest.TestCase):
             pump.pump_curve_name = new_curve_name
         for pump_name, pump in wn2.pumps():
             pump.pump_curve_name = new_curve_name
-
+        
         epa_sim = self.wntr.sim.EpanetSimulator(wn)
         epa_res = epa_sim.run_sim()
 
@@ -90,6 +92,38 @@ class TestPerformance(unittest.TestCase):
                 rel_threshold,
             )
         )
+
+    def test_Net1_float64(self):
+        """Only needs to test that runs successfully with float64 time options"""
+        inp_file = join(ex_datadir, "Net1.inp")
+        wn = self.wntr.network.WaterNetworkModel(inp_file)
+        
+        wn.options.time.duration = np.float64(wn.options.time.duration)
+        wn.options.time.hydraulic_timestep = np.float64(wn.options.time.hydraulic_timestep)
+        wn.options.time.quality_timestep = np.float64(wn.options.time.quality_timestep)
+        wn.options.time.rule_timestep = np.float64(wn.options.time.rule_timestep)
+        wn.options.time.pattern_timestep = np.float64(wn.options.time.pattern_timestep)
+        wn.options.time.pattern_start = np.float64(wn.options.time.pattern_start)
+        wn.options.time.report_timestep = np.float64(wn.options.time.report_timestep)
+        wn.options.time.report_start = np.float64(wn.options.time.report_start)
+        wn.options.time.start_clocktime = np.float64(wn.options.time.start_clocktime)
+        
+        epa_sim = self.wntr.sim.EpanetSimulator(wn)
+        epa_res = epa_sim.run_sim()
+
+        sim = self.wntr.sim.WNTRSimulator(wn)
+        results = sim.run_sim()
+    
+    def test_Net1_charset(self):
+        """Only needs to test that runs successfully with latin-1 character set."""
+        inp_file = join(test_datadir, "latin1.inp")
+        wn = self.wntr.network.WaterNetworkModel(inp_file)
+
+        epa_sim = self.wntr.sim.EpanetSimulator(wn)
+        epa_res = epa_sim.run_sim()
+
+        sim = self.wntr.sim.WNTRSimulator(wn)
+        results = sim.run_sim()
 
     def test_Net1_performance(self):
         head_diff_abs_threshold = 1e-3
@@ -212,7 +246,67 @@ class TestPerformance(unittest.TestCase):
                 rel_threshold,
             )
         )
+    
+    @pytest.mark.time_consuming
+    def test_Net6_thread_performance(self):
+        """
+        Test thread-safe performance of simulators
+        """
+        def run_epanet(wn, name):
+            sim = self.wntr.sim.EpanetSimulator(wn)
+            sim.run_sim(name, version=2.2)
 
+        def run_wntr(wn, name):
+            sim = self.wntr.sim.WNTRSimulator(wn)
+            sim.run_sim()
+
+        inp_file = join(ex_datadir, "Net6.inp")
+        wn1 = self.wntr.network.WaterNetworkModel(inp_file)
+        wn1.options.time.duration = 24 * 3600
+        wn1.options.time.hydraulic_timestep = 3600
+        wn1.options.time.report_timestep = 3600
+        wn1.remove_control(
+            "control 72"
+        )  # this control never gets activated in epanet because it uses a threshold equal to the tank max level
+        wn2 = self.wntr.network.WaterNetworkModel(inp_file)
+        wn2.options.time.duration = 24 * 3600
+        wn2.options.time.hydraulic_timestep = 3600
+        wn2.options.time.report_timestep = 3600
+        wn2.remove_control(
+            "control 72"
+        )  # this control never gets activated in epanet because it uses a threshold equal to the tank max level
+
+        start_time = time.time()
+        run_epanet(wn1, 'temp1')
+        run_epanet(wn2, 'temp2')
+        seq_time = time.time()-start_time
+
+        t1 = threading.Thread(target=run_epanet, args=(wn1, 'temp1'))
+        t2 = threading.Thread(target=run_epanet, args=(wn2, 'temp2'))
+        start_time = time.time()
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+        thr_time = time.time()-start_time
+        self.assertGreaterEqual(seq_time - thr_time, -1, 'EPANET threading took 1s longer than sequential')
+
+        start_time = time.time()
+        run_wntr(wn1, 'temp1')
+        run_wntr(wn2, 'temp2')
+        seq_time = time.time()-start_time
+
+        t1 = threading.Thread(target=run_wntr, args=(wn1, 'temp1'))
+        t2 = threading.Thread(target=run_wntr, args=(wn2, 'temp2'))
+        start_time = time.time()
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+        thr_time = time.time()-start_time
+        self.assertGreaterEqual(seq_time - thr_time, -1, 'WNTR threading took 1s longer than sequential')
+        
+    @pytest.mark.time_consuming
     def test_Net6_mod_performance(self):
         head_diff_abs_threshold = 1e-3
         demand_diff_abs_threshold = 1e-5
